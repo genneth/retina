@@ -8,6 +8,8 @@ import Data.Colour.SRGB
 
 import Control.Arrow
 import Data.List
+import Data.Ratio
+import Control.Monad
 
 white = sRGB 1 1 1
 
@@ -341,12 +343,23 @@ cycleLengthHist = histogram (map (*5) [0..39]) cycleLengths
 histogram [x] ys = [(x, length $ filter (x <=) ys)]
 histogram (x:x2:xs) ys = (x, length $ filter (\y -> x <= y && y < x2) ys):(histogram (x2:xs) ys)
 
+logNormal mu s2 x = 1/(x * sqrt(2*pi*s2)) * exp(-(log x - mu)^2/(2*s2))
+
 cycleLengthHistPlot =
-    layout1_plots ^= [Left (plotBars
-       (plot_bars_values ^= map (second (:[])) cycleLengthHist
-      $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
-      $ plot_bars_alignment ^= BarsLeft
-      $ defaultPlotBars))]
+    layout1_plots ^= [
+      Left (plotBars
+         (plot_bars_values ^= map (second ((:[]) . fromIntegral)) cycleLengthHist
+        $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
+        $ plot_bars_alignment ^= BarsLeft
+        $ defaultPlotBars)),
+      Left (toPlot
+         (plot_lines_values ^= [map (\x -> (x,5 * (fromIntegral $ length cycleLengths) * 
+                                              (logNormal (mean $ map log cycleLengths)
+                                                         (variance $ map log cycleLengths)
+                                                         x)))
+                                   $ [1..199]]
+        $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 0.8)
+        $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "Cell cycle (hours)")
   $ layout1_left_axis ^: (laxis_title ^= "Frequency")
   $ defaultLayout1
@@ -426,8 +439,54 @@ cycleLengthvsFatePlot =
                  (matchAny, matchAny)]
     labels = ["Ama+X", "2Ama", "Rph+X", "2Rph", "Bip+X", "2Bip", "Mül+X", "RPC+X", "2RPC", "All"]
 
+-- test hypothesis: daughters are more synchronous
+daughterSynchrony = map (\(Progenitor _ (Progenitor (_,y1) _ _)
+                                        (Progenitor (_,y2) _ _))
+                        -> y2 - y1)
+                  $ concatMap (findSubLT $ matchAllProlif matchProg matchProg) 
+                  $ retinalTLT
 
 -- then, the big table of doom (tm)
+countDivisions mr ml 
+  = genericLength
+  $ concatMap (findSubLT $ matchAllProlif ml mr) 
+  $ retinalLineageData
+
+divisionTimeOf match = map (\(Progenitor (y2) _ _) -> y2) 
+                     $ concatMap (findSubLT match) retinalTLT
+
+matchAllProlif ml mr t@(Progenitor _ l r)
+  | (ml l) && (mr r) = True
+  | (ml r) && (mr l) = True
+  | otherwise        = False
+matchAllProlif _ _ _    = False
+
+matchAllProlif3 aunt d1 d2 = matchAllProlif aunt (matchAllProlif d1 d2)
+
+countDivisions3 aunt d1 d2 
+  = genericLength
+  $ concatMap (findSubLT $ matchAllProlif3 aunt d1 d2)
+  $ retinalLineageData
+
+countCellType c
+  = genericLength
+  $ concatMap (findSubLT $ matchCell c)
+  $ concatMap (\(Progenitor _ l r) -> filter matchProg [l,r])
+  $ retinalLineageData
+
+printTableLn = mapM_ printRowLn
+
+printTableWithHeadingsLn cols rows t = do
+    putStr "\t"
+    printHeadings cols
+    putStrLn ""
+    sequence_ $ zipWith (\h r -> do {putStr h; putStr "\t"; printRowLn r})
+                        rows t
+  where printHeadings = sequence_ . intersperse (putStr "\t") . map putStr
+
+printRow = sequence_ . intersperse (putStr "\t") . map (putStr . show)
+printRowLn r = do {printRow r; putStrLn ""}
+
 -- differentiation channels vs absolute time
 -- monte-carlo results?
 
@@ -438,9 +497,43 @@ main = do
   renderableToPDFFile (toRenderable $ toGraph [52..76] $ retinalLineageDataSets !! 2) (12*72) (6*72) "retinalLineageData3.pdf"
   renderableToPDFFile (toRenderable $ toGraph [77..101] $ retinalLineageDataSets !! 3) (12*72) (6*72) "retinalLineageData4.pdf"
   renderableToPDFFile (toRenderable $ toGraph [102..129] $ retinalLineageDataSets !! 4) (12*72) (6*72) "retinalLineageData5.pdf"
-
+  
   renderableToPDFFile (toRenderable cycleLengthvsTimePlot) (5*72) (4*72) "cycleLengthvsTime.pdf"
   renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
-  -}  
-  renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
 
+  renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
+  -}
+  let ntot = (countDivisions matchAny matchAny) + 208
+      ndd  = (countDivisions matchDiff matchDiff) + 208
+      npd  = countDivisions matchProg matchDiff
+      npp  = countDivisions matchProg matchProg
+      pdd  = ndd % ntot
+      ppd  = npd % ntot
+      ppp  = npp % ntot
+  putStrLn $ "sym diff:    " ++ (show ndd) ++ "  " ++ (show $ round $ pdd * 100) ++ "%"
+  putStrLn $ "asym diff:   " ++ (show npd) ++ "  " ++ (show $ round $ ppd * 100) ++ "%"
+  putStrLn $ "sym prolif:  " ++ (show npp) ++ "  " ++ (show $ round $ ppp * 100) ++ "%"
+  putStrLn $ "total:       " ++ (show ntot)
+  putStr   $ "error:       " ++ (show $ ntot - ndd - npd - npp) ++ "  "
+  putStrLn $ if (ntot - ndd - npd - npp) == 0 then "good" else "BAD!!!"
+
+  let cellTypes  = enumFromTo Rph Mul
+      totalDiffs = sum $ map countCellType cellTypes
+  forM_ cellTypes (\c -> do
+    putStr   $ (show c) ++ ": " ++ (show $ countCellType c) ++ "  "
+    putStrLn $ (show $ round $ 100*(countCellType c) % totalDiffs) ++ "%")
+  putStrLn $ "Tot: " ++ (show totalDiffs)
+
+  let n3tot = countDivisions3 matchAny matchAny matchAny
+      cellMatchers = matchProg:(map matchCell $ enumFromTo Rph Mul)
+      bigTableOfDoom = [[countDivisions3 aunt d1 d2 |
+                         i <- [0..4],
+                         j <- dropWhile (<i) [0..4],
+                         let d1 = cellMatchers !! i,
+                         let d2 = cellMatchers !! j] | 
+                        aunt <- cellMatchers]
+      cellNames = map (:[]) "prabm"
+      tableColHs = [d1 ++ d2 | i <- [0..4], j <- dropWhile (<i) [0..4],
+                              let d1 = cellNames !! i,
+                              let d2 = cellNames !! j]
+  printTableWithHeadingsLn tableColHs cellNames bigTableOfDoom
