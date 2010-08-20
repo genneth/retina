@@ -9,6 +9,8 @@ import Data.Colour.SRGB
 import Control.Arrow
 import Data.List
 
+white = sRGB 1 1 1
+
 --- we have progenitor cells, and 4 other differentiated cell types.
 --- data comes in the form of lineage trees, and we'd like to minimise the
 --- amount of typing required.
@@ -178,6 +180,9 @@ mapLT f lt = mapLT2 f f lt
 foldLT f g (Progenitor d t1 t2) = f d (foldLT f g t1) (foldLT f g t2)
 foldLT f g (Differentiated t d) = g t d
 
+toList f g = foldLT (\x l r -> (f x) ++ l ++ r) g
+const2 x = (\_ _ -> x)
+
 fromInputLineageTree (P c t1 t2) 
   = Progenitor c (fromInputLineageTree t1) (fromInputLineageTree t2)
 fromInputLineageTree B           = Differentiated Rph ()
@@ -239,12 +244,12 @@ layoutTrees tts = layoutTrees' 0.0 tts
           where (left,right) = treeExtent t
     
 extractCellPositions :: Eq c => c -> LayoutLineageTree c -> [Position]
-extractCellPositions cell = foldLT (\_ l r -> l ++ r) 
+extractCellPositions cell = toList (const []) 
                                    (\c p -> if c == cell then [p] else [])
 
 extractProgenitorLines :: LayoutLineageTree c -> [[Position]]
-extractProgenitorLines = foldLT (\((dx1,dx2,dy),(x,y)) l r -> [[(x,y),(x,y-dy)],[(x-dx1,y),(x+dx2,y)]] ++ l ++ r)
-                                (\_ _ -> [])
+extractProgenitorLines = toList (\((dx1,dx2,dy),(x,y)) -> [[(x,y),(x,y-dy)],[(x-dx1,y),(x+dx2,y)]])
+                                (const2 [])
 
 -- actually produce the plots
 
@@ -252,6 +257,7 @@ extractProgenitorLines = foldLT (\((dx1,dx2,dy),(x,y)) l r -> [[(x,y),(x,y-dy)],
 toGraph names trees = 
       layout1_plots ^= [
         Left (toPlot (plot_lines_values ^= concatMap extractProgenitorLines lts
+                    $ plot_lines_style ^= solidLine 1.0 (black `withOpacity` 1.0)
                     $ defaultPlotLines)),
         Left (toPlot (plot_points_title ^= "Rod photoreceptor"
                     $ plot_points_style ^= filledCircles 3.0 (sRGB 0 0 1 `withOpacity` 1.0)
@@ -313,9 +319,8 @@ mapTLT f (Progenitor (y1,y2) t1 t2) =
 retinalTLT = map toTimeLT retinalLineageData
 
 cycleLengthvsTime = 
-  concatMap (foldLT (\(y1,y2) l r -> 
-                        (if y1 == 0.0 then [] else [(y1,y2-y1)]) ++ l ++ r)
-                    (\_ _ -> []))
+  concatMap (toList (\(y1,y2) -> if y1 == 0.0 then [] else [(y1,y2-y1)])
+                    (const2 []))
             retinalTLT
 
 cycleLengthvsTimePlot =
@@ -324,7 +329,7 @@ cycleLengthvsTimePlot =
       $ plot_points_values ^= cycleLengthvsTime
       $ defaultPlotPoints))]
   $ layout1_bottom_axis ^: (laxis_title ^= "Progenitor birth time (hours)")
-  $ layout1_left_axis ^: (laxis_title ^= "Cell cycle time (hours)")
+  $ layout1_left_axis ^: (laxis_title ^= "Cell cycle (hours)")
   $ defaultLayout1
 
 -- appears to be no variation of significance with average cycle length
@@ -342,26 +347,100 @@ cycleLengthHistPlot =
       $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
       $ plot_bars_alignment ^= BarsLeft
       $ defaultPlotBars))]
-  $ layout1_bottom_axis ^: (laxis_title ^= "Cell cycle length (hours)")
+  $ layout1_bottom_axis ^: (laxis_title ^= "Cell cycle (hours)")
   $ layout1_left_axis ^: (laxis_title ^= "Frequency")
   $ defaultLayout1
 
+-- not going to bother with too generic a framework for picking out subtrees
+
+findSubLT match t@(Progenitor _ l r) = res ++ (findSubLT match l) ++ (findSubLT match r)
+  where res = if match t then [t] else []
+findSubLT match n@(Differentiated _ _) = if match n then [n] else []
+
+cycleLengthOf match = map (\(Progenitor (y1,y2) _ _) -> y2-y1) 
+                    $ concatMap (findSubLT match) retinalTLT
+
+matchProlif ml mr (Progenitor (y1, y2) l r)
+  | y1 /= 0 && (ml l) && (mr r) = True
+  | y1 /= 0 && (ml r) && (mr l) = True
+  | otherwise = False
+matchProlif _ _ _ = False
+
+matchAny = const True
+
+matchProg (Progenitor _ _ _)   = True
+matchProg (Differentiated _ _) = False
+
+matchDiff = not . matchProg
+
+matchCell c (Progenitor _ _ _)    = False
+matchCell c (Differentiated c' _) = c == c'
+
+mean     xs = (foldl (+) 0 xs) / (fromIntegral $ length xs)
+variance xs = mean (zipWith (*) dxs dxs)
+  where dxs = zipWith (-) xs (repeat $ mean xs)
+mstd     xs = sqrt $ (foldl (+) 0 $ zipWith (*) dxs dxs) / (fromIntegral $ (length xs) - 1)
+  where dxs = zipWith (-) xs (repeat $ mean xs)
+
+cycleLengthvsFatePlot = 
+      layout1_plots ^= [
+        Left (toPlot $ PlotHidden [] [0, 150]),
+        Left (toPlot
+           (plot_errbars_values ^= zipWith3 (\x y dy -> ErrPoint (ErrValue x x x) (ErrValue (y-dy) y (y+dy)))
+                                            xs
+                                            (map mean dists)
+                                            (map mstd dists)
+          $ plot_errbars_tick_length ^= 4
+          $ plot_errbars_line_style ^= solidLine 1.0 (black `withOpacity` 1.0)
+          $ defaultPlotErrBars)),
+        Left (plotBars
+           (plot_bars_values ^= (zip xs $ map ((:[]).mean) dists)
+          $ plot_bars_item_styles ^= [(solidFillStyle (white `withOpacity` 1.0),
+                                Just $ solidLine 1.0 (black `withOpacity` 1.0))]
+          $ plot_bars_spacing ^= BarsFixGap 5.0 0.0
+          $ plot_bars_alignment ^= BarsCentered
+          $ defaultPlotBars))]
+    $ layout1_bottom_axis ^: (laxis_override ^= (axis_ticks ^= (take (length labels) $ zip xs $ repeat (-2.0)))
+                                              . (axis_labels ^= (zip xs labels)))
+                           . (laxis_style ^: (axis_label_gap ^= 2.0)
+                                           . (axis_grid_style ^= solidLine 0.0 (black `withOpacity` 0.0))
+                                           . (axis_label_style ^: font_size ^= 6.0))
+    $ layout1_left_axis ^: (laxis_title ^= "Cell cycle (hours)")
+                         . (laxis_override ^= (axis_ticks ^= (zip [0,50,100,150] $ repeat (-2.0)))
+                                            . (axis_labels ^= [(0,"0"),(50,"50"),(100,"100"),(150,"150")]))
+                         . (laxis_style ^: (axis_grid_style ^= solidLine 0.0 (black `withOpacity` 0.0))
+                                         . (axis_label_style ^: font_size ^= 8.0))
+    $ defaultLayout1
+  where
+    xs = [25,75..] :: [Int]
+    dists = map (cycleLengthOf . uncurry matchProlif)
+                [(matchCell Ama, not . matchCell Ama),
+                 (matchCell Ama, matchCell Ama),
+                 (matchCell Rph, not . matchCell Rph),
+                 (matchCell Rph, matchCell Rph),
+                 (matchCell Bip, not . matchCell Bip),
+                 (matchCell Bip, matchCell Bip),
+                 (matchCell Mul, not . matchCell Mul),
+                 (matchProg, matchDiff),
+                 (matchProg, matchProg),
+                 (matchAny, matchAny)]
+    labels = ["Ama+X", "2Ama", "Rph+X", "2Rph", "Bip+X", "2Bip", "Mül+X", "RPC+X", "2RPC", "All"]
 
 
 -- then, the big table of doom (tm)
 -- differentiation channels vs absolute time
 -- monte-carlo results?
 
-{-
 main = do
+  {-
   renderableToPDFFile (toRenderable $ toGraph [1..25] $ retinalLineageDataSets !! 0) (12*72) (6*72) "retinalLineageData1.pdf"
   renderableToPDFFile (toRenderable $ toGraph [26..51] $ retinalLineageDataSets !! 1) (12*72) (6*72) "retinalLineageData2.pdf"
   renderableToPDFFile (toRenderable $ toGraph [52..76] $ retinalLineageDataSets !! 2) (12*72) (6*72) "retinalLineageData3.pdf"
   renderableToPDFFile (toRenderable $ toGraph [77..101] $ retinalLineageDataSets !! 3) (12*72) (6*72) "retinalLineageData4.pdf"
   renderableToPDFFile (toRenderable $ toGraph [102..129] $ retinalLineageDataSets !! 4) (12*72) (6*72) "retinalLineageData5.pdf"
--}
 
-main = do
-  renderableToWindow (toRenderable cycleLengthvsTimePlot) 640 480
-  renderableToWindow (toRenderable cycleLengthHistPlot) 640 480
+  renderableToPDFFile (toRenderable cycleLengthvsTimePlot) (5*72) (4*72) "cycleLengthvsTime.pdf"
+  renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
+  -}  
+  renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
 
