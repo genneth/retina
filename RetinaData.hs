@@ -527,11 +527,47 @@ printRowLn r = do {printRow r; putStrLn ""}
 
 -- differentiation channels vs absolute time
 
+differentiationTimes c = sort $ concatMap (toList (\_ -> []) (\c' t -> if c == c' then [t] else [])) retinalTLT
+allDifferentiations = sort $ concatMap (toList (\_ -> []) (\_ t -> [t])) retinalTLT
+
+interpolate ds x' = interpolate' (f $ map (head &&& genericLength) $ group ds) x'
+  where
+    f ((x1,_):(x0,n):(x2,n2):xs) = ((x0+x1)/2, (x2+x0)/2, n):(f ((x0,n):(x2,n2):xs))
+    f (_:_:[]) = []
+    interpolate' []             _ = 0
+    interpolate' ((x0,x1,y):xs) x
+      | x0 <= x && x < x1 = y / (x1-x0)
+      | otherwise         = interpolate' xs x
+
+gaussian mu s2 x = 1/(sqrt (2*pi*s2)) * (exp (-(x - mu)^2 / (sqrt (2*s2))))
+
+gaussianInterpolate s2 ds x = 
+    sum $ map (\(dx,dy) -> dy * (gaussian dx s2 x)) 
+        $ (map (head &&& genericLength) $ group ds)
+
+differentiationRatePlotLine c colour = Left (toPlot
+   (plot_lines_values ^= [zip xs $ zipWith (/) (map diffRate xs) (map totalDiffRate xs)]
+  $ plot_lines_style ^= solidLine 1.0 (colour `withOpacity` 1.0)
+  $ defaultPlotLines))
+  where
+    xs = reverse $ tail $ reverse $ nub allDifferentiations
+    diffRate      = interpolator (differentiationTimes c)
+    totalDiffRate = interpolator allDifferentiations
+    interpolator  = gaussianInterpolate (10*10)
+    --interpolator  = interpolate
+
+differentiationRatesPlot =
+    layout1_plots ^= (zipWith differentiationRatePlotLine 
+                       (enumFromTo Rph Mul)
+                       ([sRGB 0 0 1, sRGB 1 0 0, sRGB 0 1 0, sRGB 1 1 0]))
+  $ layout1_bottom_axis ^: (laxis_title ^= "Time (hours)")
+  $ layout1_left_axis ^: (laxis_title ^= "Relative rate")
+  $ defaultLayout1
+
 -- clone size distribution
 cloneSize = foldLT (\_ l r -> l + r) (\_ _ -> 1)
 cloneSizeDist :: [LineageTree c a b] -> [(Double,Double)]
 cloneSizeDist = histogram [2..12] . map cloneSize
-
 cloneSizeDistPlot experiment theory =
     layout1_plots ^= [
       Left (plotBars
@@ -595,13 +631,15 @@ main = do
   renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
 
   renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
-  -}
+
   theory <- evalRandIO theoryTLT
   --renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
   --renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
   renderableToPDFFile (toRenderable $ cloneSizeDistPlot retinalTLT theory) (5*72) (4*72) "cloneSizeDist.pdf"
   
   renderableToPDFFile (toRenderable $ divisionSynchronyPlot) (5*72) (4*72) "divisionSynchrony.pdf"
+  -}
+  renderableToPDFFile (toRenderable $ differentiationRatesPlot) (5*72) (4*72) "differentiationRates.pdf"
 
   {-
   let ntot = (countDivisions matchAny matchAny) + 208
