@@ -12,6 +12,8 @@ import Data.Ratio
 import Control.Monad
 
 import LineageTree
+import LineageTreeMC
+import Control.Monad.Random
 
 white = sRGB 1 1 1
 
@@ -437,19 +439,25 @@ divisionSynchrony = concatMap subtractDivisions
           = []
 
 -- test hypothesis: finishing times are synchronised
-finishTimes = map (foldLT (\_ l r -> max l r) (\_ x -> x)) retinalTLT
-finishTimesHist :: [(Double, Int)]
-finishTimesHist = histogram [0,10..300] finishTimes
+finishTime :: LineageTree c (Double, Double) Double -> Double
+finishTime = foldLT (\_ l r -> max l r) (\_ x -> x)
+finishTimesHist :: [LineageTree c (Double, Double) Double] -> [(Double, Double)]
+finishTimesHist ts = map (second (/ n)) $ histogram [0,10..300] $ map finishTime ts
+  where n = genericLength ts
 
-finishTimesHistPlot =
+finishTimesHistPlot experiment theory =
     layout1_plots ^= [
       Left (plotBars
-         (plot_bars_values ^= map (second (:[])) finishTimesHist
+         (plot_bars_values ^= map (second (:[])) (finishTimesHist experiment)
         $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
         $ plot_bars_alignment ^= BarsLeft
-        $ defaultPlotBars))]
+        $ defaultPlotBars)),
+      Left (toPlot
+         (plot_lines_values ^= [finishTimesHist theory]
+        $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 1.0)
+        $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "Finish time (hours)")
-  $ layout1_left_axis ^: (laxis_title ^= "Frequency")
+  $ layout1_left_axis ^: (laxis_title ^= "Relative frequency")
   $ defaultLayout1
 
 -- first division time
@@ -502,7 +510,40 @@ printRow = sequence_ . intersperse (putStr "\t") . map (putStr . show)
 printRowLn r = do {printRow r; putStrLn ""}
 
 -- differentiation channels vs absolute time
--- monte-carlo results?
+
+
+-- monte-carlo
+
+exponentialVariable tau = do
+  x <- getRandomR (0.0, 1.0)
+  return $ -(log x) * tau
+
+normalVariable mu sigma = do
+  u <- getRandomR (0.0, 1.0)
+  v <- getRandomR (0.0, 1.0)
+  let x = sqrt(-2 * (log u)) * cos(2 * pi * v)
+  return $ x*sigma + mu
+
+logNormalVariable mu sigma = liftM exp $ normalVariable mu sigma
+
+cellCycle tau
+  | tau == 0.0 = do
+      t1 <- cellCycle'
+      t2 <- cellCycle'
+      return $ abs (t1 - t2)
+  | otherwise  = cellCycle'
+  where 
+    cellCycle' = logNormalVariable (mean logCycles) (sqrt $ variance logCycles)
+    logCycles = map log cycleLengths
+
+retinalFate _ = return Rph
+
+theoreticalLineageTrees 
+  = replicateM 100000
+  $ generateRandomLineageTree cellCycle (const 0.04, const 0.66) retinalFate
+
+theoryTLT = liftM (map toTimeLT) $ theoreticalLineageTrees
+                        
 
 main = do
   {-
@@ -517,7 +558,8 @@ main = do
 
   renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
   -}
-  renderableToPDFFile (toRenderable finishTimesHistPlot) (5*72) (4*72) "finishTimesHist.pdf"
+  theory <- evalRandIO theoryTLT
+  renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
   renderableToPDFFile (toRenderable firstDivisionTimeHistPlot) (5*72) (4*72) "firstDivisionTimeHist.pdf"
   
   let ntot = (countDivisions matchAny matchAny) + 208

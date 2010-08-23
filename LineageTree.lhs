@@ -1,11 +1,5 @@
 > {-# LANGUAGE NoMonomorphismRestriction #-}
 
- module LineageTree (
-   LineageTree, Progenitor, Differentiated,
-   mapLT2, mapLT, foldLT, toList,
-   findSubLT, matchAllProlif, matchAllProlif3, matchAny,
-   matchProg, matchDiff, matchCell) where
-
 > module LineageTree where
  
 We assume that we have one kind of progenitor, and several different types
