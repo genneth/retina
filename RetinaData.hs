@@ -340,8 +340,8 @@ cycleLengthvsTimePlot =
 cycleLengths = map snd cycleLengthvsTime
 cycleLengthHist = histogram (map (*5) [0..39]) cycleLengths
 
-histogram [x] ys = [(x, length $ filter (x <=) ys)]
-histogram (x:x2:xs) ys = (x, length $ filter (\y -> x <= y && y < x2) ys):(histogram (x2:xs) ys)
+histogram [x] ys = [(x, genericLength $ filter (x <=) ys)]
+histogram (x:x2:xs) ys = (x, genericLength $ filter (\y -> x <= y && y < x2) ys):(histogram (x2:xs) ys)
 
 logNormal mu s2 x = 1/(x * sqrt(2*pi*s2)) * exp(-(log x - mu)^2/(2*s2))
 
@@ -446,6 +446,55 @@ daughterSynchrony = map (\(Progenitor _ (Progenitor (_,y1) _ _)
                   $ concatMap (findSubLT $ matchAllProlif matchProg matchProg) 
                   $ retinalTLT
 
+-- test hypothesis: correlation between parent division time and children's
+divisionSynchrony = concatMap subtractDivisions
+                  $ concatMap (findSubLT $ matchProlif matchProg matchAny)
+                  $ retinalTLT
+  where subtractDivisions (Progenitor (y1,y2) (Progenitor (y1',  y2')  _ _)
+                                              (Progenitor (y1'', y2'') _ _))
+          = [(y2'-y1') - (y2-y1), (y2''-y1'') - (y2-y1)]
+        subtractDivisions (Progenitor (y1,y2) (Progenitor (y1', y2') _ _)
+                                              (Differentiated _ _))
+          = [(y2'-y1') - (y2-y1)]
+        subtractDivisions (Progenitor (y1,y2) (Differentiated _ _)
+                                              (Progenitor (y1', y2') _ _))
+          = [(y2'-y1') - (y2-y1)]
+        subtractDivisions (Progenitor (y1,y2) (Differentiated _ _)
+                                              (Differentiated _ _))
+          = []
+
+-- test hypothesis: finishing times are synchronised
+finishTimes = map (foldLT (\_ l r -> max l r) (\_ x -> x)) retinalTLT
+finishTimesHist :: [(Double, Int)]
+finishTimesHist = histogram [0,10..300] finishTimes
+
+finishTimesHistPlot =
+    layout1_plots ^= [
+      Left (plotBars
+         (plot_bars_values ^= map (second (:[])) finishTimesHist
+        $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
+        $ plot_bars_alignment ^= BarsLeft
+        $ defaultPlotBars))]
+  $ layout1_bottom_axis ^: (laxis_title ^= "Finish time (hours)")
+  $ layout1_left_axis ^: (laxis_title ^= "Frequency")
+  $ defaultLayout1
+
+-- first division time
+firstDivisionTime = map (\(Progenitor y _ _) -> y) retinalLineageData
+firstDivisionTimeHist :: [(Double, Int)]
+firstDivisionTimeHist = histogram [0,5..100] firstDivisionTime
+
+firstDivisionTimeHistPlot =
+    layout1_plots ^= [
+      Left (plotBars
+         (plot_bars_values ^= map (second (:[])) firstDivisionTimeHist
+        $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
+        $ plot_bars_alignment ^= BarsLeft
+        $ defaultPlotBars))]
+  $ layout1_bottom_axis ^: (laxis_title ^= "First division (hours)")
+  $ layout1_left_axis ^: (laxis_title ^= "Frequency")
+  $ defaultLayout1
+
 -- then, the big table of doom (tm)
 countDivisions mr ml 
   = genericLength
@@ -503,6 +552,9 @@ main = do
 
   renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
   -}
+  renderableToPDFFile (toRenderable finishTimesHistPlot) (5*72) (4*72) "finishTimesHist.pdf"
+  renderableToPDFFile (toRenderable firstDivisionTimeHistPlot) (5*72) (4*72) "firstDivisionTimeHist.pdf"
+  
   let ntot = (countDivisions matchAny matchAny) + 208
       ndd  = (countDivisions matchDiff matchDiff) + 208
       npd  = countDivisions matchProg matchDiff
