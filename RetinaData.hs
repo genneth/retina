@@ -328,30 +328,33 @@ cycleLengthvsTimePlot =
 -- but possibly changing variance?
 -- assume no changes, and plot the distribution
 cycleLengths = map snd cycleLengthvsTime
-cycleLengthHist = histogram (map (*5) [0..39]) cycleLengths
+cycleLengthHist = histogram [0,5..200] cycleLengths
 
-histogram [x] ys = [(x, genericLength $ filter (x <=) ys)]
-histogram (x:x2:xs) ys = (x, genericLength $ filter (\y -> x <= y && y < x2) ys):(histogram (x2:xs) ys)
+histogram xs ys = map (second (/n)) $ histogram' xs ys
+  where n = genericLength ys
+        histogram' [x] ys = []
+        histogram' (x:x2:xs) ys 
+          = (x, genericLength $ filter (\y -> x <= y && y < x2) ys)
+              :(histogram' (x2:xs) ys)
 
 logNormal mu s2 x = 1/(x * sqrt(2*pi*s2)) * exp(-(log x - mu)^2/(2*s2))
 
 cycleLengthHistPlot =
     layout1_plots ^= [
       Left (plotBars
-         (plot_bars_values ^= map (second ((:[]) . fromIntegral)) cycleLengthHist
+         (plot_bars_values ^= map (second (:[])) cycleLengthHist
         $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
         $ plot_bars_alignment ^= BarsLeft
         $ defaultPlotBars)),
       Left (toPlot
-         (plot_lines_values ^= [map (\x -> (x,5 * (fromIntegral $ length cycleLengths) * 
-                                              (logNormal (mean $ map log cycleLengths)
-                                                         (variance $ map log cycleLengths)
-                                                         x)))
+         (plot_lines_values ^= [map (\x -> (x, 5 * logNormal (mean $ map log cycleLengths)
+                                                             (variance $ map log cycleLengths)
+                                                             x))
                                    $ [1..199]]
         $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 0.8)
         $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "Cell cycle (hours)")
-  $ layout1_left_axis ^: (laxis_title ^= "Frequency")
+  $ layout1_left_axis ^: (laxis_title ^= "Proportion")
   $ defaultLayout1
 
 -- matcher that skips the first division
@@ -442,8 +445,7 @@ divisionSynchrony = concatMap subtractDivisions
 finishTime :: LineageTree c (Double, Double) Double -> Double
 finishTime = foldLT (\_ l r -> max l r) (\_ x -> x)
 finishTimesHist :: [LineageTree c (Double, Double) Double] -> [(Double, Double)]
-finishTimesHist ts = map (second (/ n)) $ histogram [0,10..300] $ map finishTime ts
-  where n = genericLength ts
+finishTimesHist = histogram [0,10..300] . map finishTime
 
 finishTimesHistPlot experiment theory =
     layout1_plots ^= [
@@ -461,19 +463,23 @@ finishTimesHistPlot experiment theory =
   $ defaultLayout1
 
 -- first division time
-firstDivisionTime = map (\(Progenitor y _ _) -> y) retinalLineageData
-firstDivisionTimeHist :: [(Double, Int)]
-firstDivisionTimeHist = histogram [0,5..100] firstDivisionTime
+firstDivisionTime = (\(Progenitor (y1,y2) _ _) -> y2-y1)
+firstDivisionTimeHist :: [LineageTree c (Double, Double) Double] -> [(Double, Double)]
+firstDivisionTimeHist = histogram [0,5..100] . map firstDivisionTime
 
-firstDivisionTimeHistPlot =
+firstDivisionTimeHistPlot experiment theory =
     layout1_plots ^= [
       Left (plotBars
-         (plot_bars_values ^= map (second (:[])) firstDivisionTimeHist
+         (plot_bars_values ^= map (second (:[])) (firstDivisionTimeHist experiment)
         $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
         $ plot_bars_alignment ^= BarsLeft
-        $ defaultPlotBars))]
+        $ defaultPlotBars)),
+      Left (toPlot
+         (plot_lines_values ^= [firstDivisionTimeHist theory]
+        $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 1.0)
+        $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "First division (hours)")
-  $ layout1_left_axis ^: (laxis_title ^= "Frequency")
+  $ layout1_left_axis ^: (laxis_title ^= "Relative frequency")
   $ defaultLayout1
 
 -- then, the big table of doom (tm)
@@ -510,7 +516,6 @@ printRow = sequence_ . intersperse (putStr "\t") . map (putStr . show)
 printRowLn r = do {printRow r; putStrLn ""}
 
 -- differentiation channels vs absolute time
-
 
 -- monte-carlo
 
@@ -552,15 +557,16 @@ main = do
   renderableToPDFFile (toRenderable $ toGraph [52..76] $ retinalLineageDataSets !! 2) (12*72) (6*72) "retinalLineageData3.pdf"
   renderableToPDFFile (toRenderable $ toGraph [77..101] $ retinalLineageDataSets !! 3) (12*72) (6*72) "retinalLineageData4.pdf"
   renderableToPDFFile (toRenderable $ toGraph [102..129] $ retinalLineageDataSets !! 4) (12*72) (6*72) "retinalLineageData5.pdf"
-  
+
   renderableToPDFFile (toRenderable cycleLengthvsTimePlot) (5*72) (4*72) "cycleLengthvsTime.pdf"
+  -}
   renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
 
-  renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
-  -}
+  --renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
+  
   theory <- evalRandIO theoryTLT
   renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
-  renderableToPDFFile (toRenderable firstDivisionTimeHistPlot) (5*72) (4*72) "firstDivisionTimeHist.pdf"
+  renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
   
   let ntot = (countDivisions matchAny matchAny) + 208
       ndd  = (countDivisions matchDiff matchDiff) + 208
