@@ -425,21 +425,31 @@ daughterSynchrony = map (\(Progenitor _ (Progenitor (_,y1) _ _)
                   $ retinalTLT
 
 -- test hypothesis: correlation between parent division time and children's
-divisionSynchrony = concatMap subtractDivisions
+divisionSynchrony = concatMap divisions
                   $ concatMap (findSubLT $ matchProlif matchProg matchAny)
                   $ retinalTLT
-  where subtractDivisions (Progenitor (y1,y2) (Progenitor (y1',  y2')  _ _)
-                                              (Progenitor (y1'', y2'') _ _))
-          = [(y2'-y1') - (y2-y1), (y2''-y1'') - (y2-y1)]
-        subtractDivisions (Progenitor (y1,y2) (Progenitor (y1', y2') _ _)
-                                              (Differentiated _ _))
-          = [(y2'-y1') - (y2-y1)]
-        subtractDivisions (Progenitor (y1,y2) (Differentiated _ _)
-                                              (Progenitor (y1', y2') _ _))
-          = [(y2'-y1') - (y2-y1)]
-        subtractDivisions (Progenitor (y1,y2) (Differentiated _ _)
-                                              (Differentiated _ _))
+  where divisions (Progenitor (y1,y2) (Progenitor (y1',  y2')  _ _)
+                  (Progenitor (y1'', y2'') _ _))
+          = [(y2-y1, y2'-y1'), (y2-y1, y2''-y1'')]
+        divisions (Progenitor (y1,y2) (Progenitor (y1', y2') _ _)
+                  (Differentiated _ _))
+          = [(y2-y1, y2'-y1')]
+        divisions (Progenitor (y1,y2) (Differentiated _ _)
+                  (Progenitor (y1', y2') _ _))
+          = [(y2-y1, y2'-y1')]
+        divisions (Progenitor (y1,y2) (Differentiated _ _)
+                  (Differentiated _ _))
           = []
+
+divisionSynchronyPlot =     
+    layout1_plots ^= [Left (toPlot
+       (plot_points_style ^= filledCircles 3.0 (black `withOpacity` 1.0)
+      $ plot_points_values ^= divisionSynchrony
+      $ defaultPlotPoints))]
+  $ layout1_bottom_axis ^: (laxis_title ^= "Parent cell cycle (hours)")
+  $ layout1_left_axis ^: (laxis_title ^= "Child cell cycle (hours)")
+  $ defaultLayout1
+
 
 -- test hypothesis: finishing times are synchronised
 finishTime :: LineageTree c (Double, Double) Double -> Double
@@ -455,7 +465,7 @@ finishTimesHistPlot experiment theory =
         $ plot_bars_alignment ^= BarsLeft
         $ defaultPlotBars)),
       Left (toPlot
-         (plot_lines_values ^= [finishTimesHist theory]
+         (plot_lines_values ^= [map (first (+5)) $ finishTimesHist theory]
         $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 1.0)
         $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "Finish time (hours)")
@@ -475,7 +485,7 @@ firstDivisionTimeHistPlot experiment theory =
         $ plot_bars_alignment ^= BarsLeft
         $ defaultPlotBars)),
       Left (toPlot
-         (plot_lines_values ^= [firstDivisionTimeHist theory]
+         (plot_lines_values ^= [map (first (+2.5)) $ firstDivisionTimeHist theory]
         $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 1.0)
         $ defaultPlotLines))]
   $ layout1_bottom_axis ^: (laxis_title ^= "First division (hours)")
@@ -517,6 +527,28 @@ printRowLn r = do {printRow r; putStrLn ""}
 
 -- differentiation channels vs absolute time
 
+-- clone size distribution
+cloneSize = foldLT (\_ l r -> l + r) (\_ _ -> 1)
+cloneSizeDist :: [LineageTree c a b] -> [(Double,Double)]
+cloneSizeDist = histogram [2..12] . map cloneSize
+
+cloneSizeDistPlot experiment theory =
+    layout1_plots ^= [
+      Left (plotBars
+         (plot_bars_values ^= (2,[208/n']):(map (second ((:[]) . (*(n/n')))) (cloneSizeDist experiment))
+        $ plot_bars_spacing ^= BarsFixGap 0.0 0.0
+        $ plot_bars_alignment ^= BarsLeft
+        $ defaultPlotBars)),
+      Left (toPlot
+         (plot_lines_values ^= [map (first (+0.5)) $ cloneSizeDist theory]
+        $ plot_lines_style ^= solidLine 2.0 (black `withOpacity` 1.0)
+        $ defaultPlotLines))]
+  $ layout1_bottom_axis ^: (laxis_title ^= "Eventual clone size")
+  $ layout1_left_axis ^: (laxis_title ^= "Relative frequency")
+  $ defaultLayout1
+  where n = genericLength experiment
+        n' = n + 208
+
 -- monte-carlo
 
 exponentialVariable tau = do
@@ -557,17 +589,21 @@ main = do
   renderableToPDFFile (toRenderable $ toGraph [52..76] $ retinalLineageDataSets !! 2) (12*72) (6*72) "retinalLineageData3.pdf"
   renderableToPDFFile (toRenderable $ toGraph [77..101] $ retinalLineageDataSets !! 3) (12*72) (6*72) "retinalLineageData4.pdf"
   renderableToPDFFile (toRenderable $ toGraph [102..129] $ retinalLineageDataSets !! 4) (12*72) (6*72) "retinalLineageData5.pdf"
-
+  
   renderableToPDFFile (toRenderable cycleLengthvsTimePlot) (5*72) (4*72) "cycleLengthvsTime.pdf"
-  -}
+ 
   renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
 
-  --renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
-  
+  renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
+  -}
   theory <- evalRandIO theoryTLT
-  renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
-  renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
+  --renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
+  --renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
+  renderableToPDFFile (toRenderable $ cloneSizeDistPlot retinalTLT theory) (5*72) (4*72) "cloneSizeDist.pdf"
   
+  renderableToPDFFile (toRenderable $ divisionSynchronyPlot) (5*72) (4*72) "divisionSynchrony.pdf"
+
+  {-
   let ntot = (countDivisions matchAny matchAny) + 208
       ndd  = (countDivisions matchDiff matchDiff) + 208
       npd  = countDivisions matchProg matchDiff
@@ -602,3 +638,4 @@ main = do
                               let d1 = cellNames !! i,
                               let d2 = cellNames !! j]
   printTableWithHeadingsLn tableColHs cellNames bigTableOfDoom
+  -}
