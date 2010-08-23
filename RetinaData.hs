@@ -11,6 +11,8 @@ import Data.List
 import Data.Ratio
 import Control.Monad
 
+import LineageTree
+
 white = sRGB 1 1 1
 
 --- we have progenitor cells, and 4 other differentiated cell types.
@@ -165,24 +167,10 @@ inputRetinalLineageData5 = scaleFirstTime [
   P 5 B (P 42.2 B (P 59 B (P 72.2 G B))),
   P 2 B (P 87.5 B (P 64.2 G G))]
 
--- more generic lineage tree type
-data LineageTree t a b = 
-    Progenitor a (LineageTree t a b) (LineageTree t a b) 
-  | Differentiated t b
-  deriving (Eq, Show, Read)
-
+-- convert to generic LineageTree
 data RetinalCells = Rph | Ama | Bip | Mul | Unk deriving (Eq, Enum, Show, Read)
 type RetinalLineageTree = LineageTree RetinalCells
 
-mapLT2 f g (Progenitor d t1 t2) 
-  = Progenitor (f d) (mapLT2 f g t1) (mapLT2 f g t2)
-mapLT2 f g (Differentiated t d) = Differentiated t (g d)
-mapLT f lt = mapLT2 f f lt
-
-foldLT f g (Progenitor d t1 t2) = f d (foldLT f g t1) (foldLT f g t2)
-foldLT f g (Differentiated t d) = g t d
-
-toList f g = foldLT (\x l r -> (f x) ++ l ++ r) g
 const2 x = (\_ _ -> x)
 
 fromInputLineageTree (P c t1 t2) 
@@ -364,30 +352,15 @@ cycleLengthHistPlot =
   $ layout1_left_axis ^: (laxis_title ^= "Frequency")
   $ defaultLayout1
 
--- not going to bother with too generic a framework for picking out subtrees
-
-findSubLT match t@(Progenitor _ l r) = res ++ (findSubLT match l) ++ (findSubLT match r)
-  where res = if match t then [t] else []
-findSubLT match n@(Differentiated _ _) = if match n then [n] else []
-
-cycleLengthOf match = map (\(Progenitor (y1,y2) _ _) -> y2-y1) 
-                    $ concatMap (findSubLT match) retinalTLT
-
+-- matcher that skips the first division
 matchProlif ml mr (Progenitor (y1, y2) l r)
   | y1 /= 0 && (ml l) && (mr r) = True
   | y1 /= 0 && (ml r) && (mr l) = True
   | otherwise = False
 matchProlif _ _ _ = False
 
-matchAny = const True
-
-matchProg (Progenitor _ _ _)   = True
-matchProg (Differentiated _ _) = False
-
-matchDiff = not . matchProg
-
-matchCell c (Progenitor _ _ _)    = False
-matchCell c (Differentiated c' _) = c == c'
+cycleLengthOf match = map (\(Progenitor (y1,y2) _ _) -> y2-y1) 
+                    $ concatMap (findSubLT match) retinalTLT
 
 mean     xs = (foldl (+) 0 xs) / (fromIntegral $ length xs)
 variance xs = mean (zipWith (*) dxs dxs)
@@ -503,14 +476,6 @@ countDivisions mr ml
 
 divisionTimeOf match = map (\(Progenitor (y2) _ _) -> y2) 
                      $ concatMap (findSubLT match) retinalTLT
-
-matchAllProlif ml mr t@(Progenitor _ l r)
-  | (ml l) && (mr r) = True
-  | (ml r) && (mr l) = True
-  | otherwise        = False
-matchAllProlif _ _ _    = False
-
-matchAllProlif3 aunt d1 d2 = matchAllProlif aunt (matchAllProlif d1 d2)
 
 countDivisions3 aunt d1 d2 
   = genericLength
