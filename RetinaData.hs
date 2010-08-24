@@ -495,22 +495,19 @@ firstDivisionTimeHistPlot experiment theory =
 -- then, the big table of doom (tm)
 countDivisions mr ml 
   = genericLength
-  $ concatMap (findSubLT $ matchAllProlif ml mr) 
-  $ retinalLineageData
+  . concatMap (findSubLT $ matchAllProlif ml mr) 
 
 divisionTimeOf match = map (\(Progenitor (y2) _ _) -> y2) 
                      $ concatMap (findSubLT match) retinalTLT
 
 countDivisions3 aunt d1 d2 
   = genericLength
-  $ concatMap (findSubLT $ matchAllProlif3 aunt d1 d2)
-  $ retinalLineageData
+  . concatMap (findSubLT $ matchAllProlif3 aunt d1 d2)
 
 countCellType c
   = genericLength
-  $ concatMap (findSubLT $ matchCell c)
-  $ concatMap (\(Progenitor _ l r) -> filter matchProg [l,r])
-  $ retinalLineageData
+  . concatMap (findSubLT $ matchCell c)
+  . concatMap (\(Progenitor _ l r) -> filter matchProg [l,r])
 
 printTableLn = mapM_ printRowLn
 
@@ -524,6 +521,23 @@ printTableWithHeadingsLn cols rows t = do
 
 printRow = sequence_ . intersperse (putStr "\t") . map (putStr . show)
 printRowLn r = do {printRow r; putStrLn ""}
+
+division3table lt = 
+  let n3tot = countDivisions3 matchAny matchAny matchAny lt
+      cellMatchers = matchProg:(map matchCell $ enumFromTo Rph Mul)
+      bigTableOfDoom = [[countDivisions3 aunt d1 d2 lt |
+                         i <- [0..4],
+                         j <- dropWhile (<i) [0..4],
+                         let d1 = cellMatchers !! i,
+                         let d2 = cellMatchers !! j] | 
+                        aunt <- cellMatchers]
+      cellNames = map (:[]) "prabm"
+      tableColHs = [d1 ++ d2 | i <- [0..4], j <- dropWhile (<i) [0..4],
+                              let d1 = cellNames !! i,
+                              let d2 = cellNames !! j]
+  in
+      printTableWithHeadingsLn tableColHs cellNames bigTableOfDoom
+
 
 -- differentiation channels vs absolute time
 
@@ -545,9 +559,10 @@ gaussianInterpolate s2 ds x =
     sum $ map (\(dx,dy) -> dy * (gaussian dx s2 x)) 
         $ (map (head &&& genericLength) $ group ds)
 
-differentiationRatePlotLine c colour = Left (toPlot
+differentiationRatePlotLine c colour name = Left (toPlot
    (plot_lines_values ^= [zip xs $ zipWith (/) (map diffRate xs) (map totalDiffRate xs)]
   $ plot_lines_style ^= solidLine 1.0 (colour `withOpacity` 1.0)
+  $ plot_lines_title ^= name
   $ defaultPlotLines))
   where
     xs = reverse $ tail $ reverse $ nub allDifferentiations
@@ -556,10 +571,21 @@ differentiationRatePlotLine c colour = Left (toPlot
     interpolator  = gaussianInterpolate (10*10)
     --interpolator  = interpolate
 
+diffRateMCPlotLine n colour = Left (toPlot
+   (plot_lines_values ^= [zip xs $ map ((!!n) . diffProbs) xs]
+  $ plot_lines_style ^= dashedLine 1.0 [4.0, 4.0] (colour `withOpacity` 0.8)
+  $ defaultPlotLines))
+  where
+    xs = nub allDifferentiations
+
 differentiationRatesPlot =
-    layout1_plots ^= (zipWith differentiationRatePlotLine 
-                       (enumFromTo Rph Mul)
-                       ([sRGB 0 0 1, sRGB 1 0 0, sRGB 0 1 0, sRGB 1 1 0]))
+    layout1_plots ^= ((zipWith3 differentiationRatePlotLine 
+                        (enumFromTo Rph Mul)
+                        [sRGB 0 0 1, sRGB 1 0 0, sRGB 0 1 0, sRGB 1 1 0]
+                        ["Rod photoreceptor", "Amacrine", "Bipolar", "Müller glial"]))
+--                   ++ (zipWith diffRateMCPlotLine
+--                        [0..4]
+--                        [sRGB 0 0 1, sRGB 1 0 0, sRGB 0 1 0, sRGB 1 1 0]))
   $ layout1_bottom_axis ^: (laxis_title ^= "Time (hours)")
   $ layout1_left_axis ^: (laxis_title ^= "Relative rate")
   $ defaultLayout1
@@ -609,17 +635,35 @@ cellCycle tau
     cellCycle' = logNormalVariable (mean logCycles) (sqrt $ variance logCycles)
     logCycles = map log cycleLengths
 
-retinalFate _ = return Rph
+biasedDie :: (MonadRandom m) => [Double] -> m Int
+biasedDie probs = do
+    p <- getRandomR (0.0, 1.0)
+    return $ toInt 0 probs p
+  where toInt n (p:ps) p0
+          | p0 <= p   = n
+          | otherwise = toInt (succ n) ps (p0 - p)
+
+retinalFate :: (MonadRandom m) => Double -> m RetinalCells
+retinalFate t = liftM toEnum $ biasedDie $ diffProbs t
+
+diffProbs t
+  | t < 250   = map (/totalRate) rates
+  | otherwise = [0.70, 0.00, 0.00, 0.30]
+  where
+    totalRate = sum rates
+    rates = map 
+              (\c -> gaussianInterpolate (10*10) (differentiationTimes c) t)
+              (enumFromTo Rph Mul)
 
 theoreticalLineageTrees 
   = replicateM 100000
-  $ generateRandomLineageTree cellCycle (const 0.04, const 0.66) retinalFate
+  $ generateRandomLineageTree cellCycle (const 0.039, const 0.658) retinalFate
 
 theoryTLT = liftM (map toTimeLT) $ theoreticalLineageTrees
                         
 
 main = do
-  {-
+
   renderableToPDFFile (toRenderable $ toGraph [1..25] $ retinalLineageDataSets !! 0) (12*72) (6*72) "retinalLineageData1.pdf"
   renderableToPDFFile (toRenderable $ toGraph [26..51] $ retinalLineageDataSets !! 1) (12*72) (6*72) "retinalLineageData2.pdf"
   renderableToPDFFile (toRenderable $ toGraph [52..76] $ retinalLineageDataSets !! 2) (12*72) (6*72) "retinalLineageData3.pdf"
@@ -631,21 +675,20 @@ main = do
   renderableToPDFFile (toRenderable cycleLengthHistPlot) (5*72) (4*72) "cycleLengthHist.pdf"
 
   renderableToPDFFile (toRenderable cycleLengthvsFatePlot) (4*72) (3*72) "cycleLengthvsFate.pdf"
-
-  theory <- evalRandIO theoryTLT
-  --renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
-  --renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
-  renderableToPDFFile (toRenderable $ cloneSizeDistPlot retinalTLT theory) (5*72) (4*72) "cloneSizeDist.pdf"
   
-  renderableToPDFFile (toRenderable $ divisionSynchronyPlot) (5*72) (4*72) "divisionSynchrony.pdf"
-  -}
-  renderableToPDFFile (toRenderable $ differentiationRatesPlot) (5*72) (4*72) "differentiationRates.pdf"
+  theory <- evalRandIO theoryTLT
+  renderableToPDFFile (toRenderable $ finishTimesHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "finishTimesHist.pdf"
+  renderableToPDFFile (toRenderable $ firstDivisionTimeHistPlot retinalTLT $ filter (matchAllProlif matchProg matchAny) theory) (5*72) (4*72) "firstDivisionTimeHist.pdf"
+  renderableToPDFFile (toRenderable $ cloneSizeDistPlot retinalTLT theory) (5*72) (4*72) "cloneSizeDist.pdf"
 
-  {-
-  let ntot = (countDivisions matchAny matchAny) + 208
-      ndd  = (countDivisions matchDiff matchDiff) + 208
-      npd  = countDivisions matchProg matchDiff
-      npp  = countDivisions matchProg matchProg
+  renderableToPDFFile (toRenderable $ divisionSynchronyPlot) (5*72) (4*72) "divisionSynchrony.pdf"
+
+  renderableToPDFFile (toRenderable $ differentiationRatesPlot) (5*72) (4*72) "differentiationRates.pdf"
+  
+  let ntot = (countDivisions matchAny matchAny retinalLineageData) + 208
+      ndd  = (countDivisions matchDiff matchDiff retinalLineageData) + 208
+      npd  = countDivisions matchProg matchDiff retinalLineageData
+      npp  = countDivisions matchProg matchProg retinalLineageData
       pdd  = ndd % ntot
       ppd  = npd % ntot
       ppp  = npp % ntot
@@ -657,23 +700,13 @@ main = do
   putStrLn $ if (ntot - ndd - npd - npp) == 0 then "good" else "BAD!!!"
 
   let cellTypes  = enumFromTo Rph Mul
-      totalDiffs = sum $ map countCellType cellTypes
+      totalDiffs = sum $ map (flip countCellType retinalLineageData) cellTypes
   forM_ cellTypes (\c -> do
-    putStr   $ (show c) ++ ": " ++ (show $ countCellType c) ++ "  "
-    putStrLn $ (show $ round $ 100*(countCellType c) % totalDiffs) ++ "%")
+    putStr   $ (show c) ++ ": " ++ (show $ countCellType c retinalLineageData) ++ "  "
+    putStrLn $ (show $ round $ 100*(countCellType c retinalLineageData) % totalDiffs) ++ "%")
   putStrLn $ "Tot: " ++ (show totalDiffs)
+  
+  division3table retinalLineageData
+  theoreticalLineageData <- evalRandIO theoreticalLineageTrees
+  division3table theoreticalLineageData
 
-  let n3tot = countDivisions3 matchAny matchAny matchAny
-      cellMatchers = matchProg:(map matchCell $ enumFromTo Rph Mul)
-      bigTableOfDoom = [[countDivisions3 aunt d1 d2 |
-                         i <- [0..4],
-                         j <- dropWhile (<i) [0..4],
-                         let d1 = cellMatchers !! i,
-                         let d2 = cellMatchers !! j] | 
-                        aunt <- cellMatchers]
-      cellNames = map (:[]) "prabm"
-      tableColHs = [d1 ++ d2 | i <- [0..4], j <- dropWhile (<i) [0..4],
-                              let d1 = cellNames !! i,
-                              let d2 = cellNames !! j]
-  printTableWithHeadingsLn tableColHs cellNames bigTableOfDoom
-  -}
