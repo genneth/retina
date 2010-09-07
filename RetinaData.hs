@@ -405,17 +405,28 @@ cycleLengthvsFatePlot =
   where
     xs = [25,75..] :: [Int]
     dists = map (cycleLengthOf . uncurry matchProlif)
-                [(matchCell Ama, not . matchCell Ama),
-                 (matchCell Ama, matchCell Ama),
-                 (matchCell Rph, not . matchCell Rph),
+                [(matchProg, matchProg),
+                 (matchProg, matchCell Rph),
+                 (matchProg, matchCell Ama),
+                 (matchProg, matchCell Bip),
+                 (matchProg, matchCell Mul),
                  (matchCell Rph, matchCell Rph),
-                 (matchCell Bip, not . matchCell Bip),
+                 (matchCell Rph, matchCell Ama),
+                 (matchCell Rph, matchCell Bip),
+                 (matchCell Rph, matchCell Mul),
+                 (matchCell Ama, matchCell Ama),
+                 (matchCell Ama, matchCell Bip),
+--                 (matchCell Ama, matchCell Mul),
                  (matchCell Bip, matchCell Bip),
-                 (matchCell Mul, not . matchCell Mul),
-                 (matchProg, matchDiff),
-                 (matchProg, matchProg),
+                 (matchCell Bip, matchCell Mul),
+--                 (matchCell Mul, matchCell Mul),
                  (matchAny, matchAny)]
-    labels = ["Ama+X", "2Ama", "Rph+X", "2Rph", "Bip+X", "2Bip", "Mül+X", "RPC+X", "2RPC", "All"]
+    labels = ["2RPC", "RPC+Rph", "RPC+Ama", "RPC+Bip", "RPC+Mül", 
+              "2Rph", "Rph+Ama", "Rph+Bip", "Rph+Mül",
+              "2Ama", "Ama+Bip", --"Ama+Mül",
+              "2Bip", "Bip+Mül",
+--              "2Mül",
+              "All"]
 
 -- test hypothesis: daughters are more synchronous
 daughterSynchrony = map (\(Progenitor _ (Progenitor (_,y1) _ _)
@@ -495,7 +506,7 @@ firstDivisionTimeHistPlot experiment theory =
 -- then, the big table of doom (tm)
 countDivisions mr ml 
   = genericLength
-  . concatMap (findSubLT $ matchAllProlif ml mr) 
+  . concatMap (findSubLT $ matchProlif ml mr) 
 
 divisionTimeOf match = map (\(Progenitor (y2) _ _) -> y2) 
                      $ concatMap (findSubLT match) retinalTLT
@@ -507,7 +518,7 @@ countDivisions3 aunt d1 d2
 countCellType c
   = genericLength
   . concatMap (findSubLT $ matchCell c)
-  . concatMap (\(Progenitor _ l r) -> filter matchProg [l,r])
+--  . concatMap (\(Progenitor _ l r) -> filter matchProg [l,r])
 
 printTableLn = mapM_ printRowLn
 
@@ -657,7 +668,7 @@ diffProbs t
 
 theoreticalLineageTrees 
   = replicateM 100000
-  $ generateRandomLineageTree cellCycle (const 0.039, const 0.658) retinalFate
+  $ generateRandomLineageTree cellCycle (const (11/199), const (144/199)) retinalFate
 
 theoryTLT = liftM (map toTimeLT) $ theoreticalLineageTrees
                         
@@ -684,29 +695,30 @@ main = do
   renderableToPDFFile (toRenderable $ divisionSynchronyPlot) (5*72) (4*72) "divisionSynchrony.pdf"
 
   renderableToPDFFile (toRenderable $ differentiationRatesPlot) (5*72) (4*72) "differentiationRates.pdf"
-  
-  let ntot = (countDivisions matchAny matchAny retinalLineageData) + 208
-      ndd  = (countDivisions matchDiff matchDiff retinalLineageData) + 208
-      npd  = countDivisions matchProg matchDiff retinalLineageData
-      npp  = countDivisions matchProg matchProg retinalLineageData
+
+  let ntot = countDivisions matchAny matchAny retinalTLT
+      ndd  = countDivisions matchDiff matchDiff retinalTLT
+      npd  = countDivisions matchProg matchDiff retinalTLT
+      npp  = countDivisions matchProg matchProg retinalTLT
       pdd  = ndd % ntot
       ppd  = npd % ntot
       ppp  = npp % ntot
-  putStrLn $ "sym diff:    " ++ (show ndd) ++ "  " ++ (show $ round $ pdd * 100) ++ "%"
-  putStrLn $ "asym diff:   " ++ (show npd) ++ "  " ++ (show $ round $ ppd * 100) ++ "%"
-  putStrLn $ "sym prolif:  " ++ (show npp) ++ "  " ++ (show $ round $ ppp * 100) ++ "%"
+  putStrLn $ "sym diff:    " ++ (show ndd) ++ "  " ++ (show $ round $ pdd * 1000) ++ "%"
+  putStrLn $ "asym diff:   " ++ (show npd) ++ "  " ++ (show $ round $ ppd * 1000) ++ "%"
+  putStrLn $ "sym prolif:  " ++ (show npp) ++ "  " ++ (show $ round $ ppp * 1000) ++ "%"
   putStrLn $ "total:       " ++ (show ntot)
   putStr   $ "error:       " ++ (show $ ntot - ndd - npd - npp) ++ "  "
   putStrLn $ if (ntot - ndd - npd - npp) == 0 then "good" else "BAD!!!"
 
-  let cellTypes  = enumFromTo Rph Mul
+  let cellTypes  = enumFromTo Rph Unk
       totalDiffs = sum $ map (flip countCellType retinalLineageData) cellTypes
   forM_ cellTypes (\c -> do
     putStr   $ (show c) ++ ": " ++ (show $ countCellType c retinalLineageData) ++ "  "
-    putStrLn $ (show $ round $ 100*(countCellType c retinalLineageData) % totalDiffs) ++ "%")
+    putStrLn $ (show $ round $ 1000*(countCellType c retinalLineageData) % totalDiffs) ++ "%")
   putStrLn $ "Tot: " ++ (show totalDiffs)
-  
+{-  
   division3table retinalLineageData
   theoreticalLineageData <- evalRandIO theoreticalLineageTrees
   division3table theoreticalLineageData
+-}
 
