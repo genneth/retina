@@ -421,10 +421,10 @@ cycleLengthvsFatePlot =
                  (matchCell Bip, matchCell Mul),
 --                 (matchCell Mul, matchCell Mul),
                  (matchAny, matchAny)]
-    labels = ["2RPC", "RPC+Rph", "RPC+Ama", "RPC+Bip", "RPC+Mül", 
-              "2Rph", "Rph+Ama", "Rph+Bip", "Rph+Mül",
-              "2Ama", "Ama+Bip", --"Ama+Mül",
-              "2Bip", "Bip+Mül",
+    labels = ["2P", "P+R", "P+A", "P+B", "P+M", 
+              "2R", "R+A", "R+B", "R+M",
+              "2A", "A+B", --"Ama+Mül",
+              "2B", "B+M",
 --              "2Mül",
               "All"]
 
