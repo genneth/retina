@@ -13,9 +13,9 @@ dlmwrite('bigTableOfDoomChances.txt', chances, '\t');
 fh = fopen('bigTableOfDoomData.tex', 'w');
 
 [rows, cols] = size(cs);
-fprintf(fh, '~ & pp & pr & pa & pb & pm & rr & ra & rb & rm & aa & ab & am & bb & bm & mm \\\\\n');
+fprintf(fh, '~ & $2\\times$RPC & RPC RPh & RPC Am & RPC Bi & RPC Mu & $2\\times$RPh & RPh Am & RPh Bi & RPh Mu & $2\\times$Am & Am Bi & Am Mu & $2\\times$Bi & Bi Mu & $2\\times$Mu \\\\\n');
 fprintf(fh, '\\hline\n');
-rowh = {'p', 'r', 'a', 'b', 'm'};
+rowh = {'RPC', 'RPh', 'Am', 'Bi', 'Mu'};
 for i = 1:(rows-1)
     fprintf(fh, rowh{i});
     for j = 1:cols
